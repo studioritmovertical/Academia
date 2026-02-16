@@ -6,6 +6,12 @@ export interface Teacher {
   modality: string;
 }
 
+export interface Administrator {
+  id: string;
+  name: string;
+  email: string;
+}
+
 export interface Class {
   id: string;
   teacherId: string;
