@@ -15,7 +15,9 @@ const App: React.FC = () => {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null);
   const [emailInput, setEmailInput] = useState('');
 
   const isOfficialEmail = emailInput.toLowerCase().endsWith('@ritmovertical.com');
@@ -23,6 +25,13 @@ const App: React.FC = () => {
   useEffect(() => {
     const initSession = async () => {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
+      
+      // Verifica se o usuário veio de um link de recuperação de senha
+      const hash = window.location.hash;
+      if (hash && hash.includes('type=recovery')) {
+        setIsRecovering(true);
+      }
+
       setSession(currentSession);
       if (currentSession?.user) {
         await fetchTeacherProfile(currentSession.user.id);
@@ -33,8 +42,13 @@ const App: React.FC = () => {
 
     initSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       setSession(newSession);
+      
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecovering(true);
+      }
+
       if (newSession?.user) {
         await fetchTeacherProfile(newSession.user.id);
       } else {
@@ -53,7 +67,6 @@ const App: React.FC = () => {
       let { data, error } = await supabase.from('teachers').select('*').eq('id', userId).single();
       
       if (!data && !error) {
-        // Retry for new triggers (Supabase trigger might take a second)
         await new Promise(resolve => setTimeout(resolve, 2000));
         const retry = await supabase.from('teachers').select('*').eq('id', userId).single();
         data = retry.data;
@@ -62,8 +75,8 @@ const App: React.FC = () => {
       if (data) {
         setCurrentUser(data);
         await fetchData(userId);
-      } else {
-        setAuthError("Perfil não encontrado. Se você acabou de se cadastrar, aguarde 5 segundos e atualize a página.");
+      } else if (!isRecovering) {
+        setAuthError("Perfil não encontrado. Verifique seu cadastro.");
       }
     } catch (err) {
       console.error(err);
@@ -101,14 +114,36 @@ const App: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     setAuthError(null);
+    setAuthSuccess(null);
     const fd = new FormData(e.currentTarget as HTMLFormElement);
     const { error } = await supabase.auth.signInWithPassword({
       email: fd.get('email') as string,
       password: fd.get('password') as string,
     });
     if (error) { 
-      setAuthError(error.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos. Professores pré-configurados já possuem conta, tente a senha padrão ou recupere-a.' : error.message); 
+      setAuthError(error.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : error.message); 
       setLoading(false); 
+    }
+  };
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setAuthError(null);
+    const fd = new FormData(e.currentTarget as HTMLFormElement);
+    const newPassword = fd.get('new_password') as string;
+    
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    
+    if (error) {
+      setAuthError(error.message);
+      setLoading(false);
+    } else {
+      setAuthSuccess("Senha atualizada com sucesso! Você já pode acessar o sistema.");
+      setIsRecovering(false);
+      setLoading(false);
+      // Limpar o hash da URL
+      window.history.replaceState(null, '', window.location.pathname);
     }
   };
 
@@ -123,18 +158,17 @@ const App: React.FC = () => {
     const { error } = await supabase.auth.signUp({
       email,
       password: fd.get('password') as string,
-      options: { data: { name } }
+      options: { 
+        data: { name },
+        emailRedirectTo: window.location.origin 
+      }
     });
     
     if (error) { 
-      if (error.message.includes('rate limit')) {
-        setAuthError("Muitas tentativas! O sistema bloqueou novos cadastros temporariamente por segurança. Se você é um professor oficial, tente entrar em 'Fazer Login' em vez de cadastrar.");
-      } else {
-        setAuthError(error.message); 
-      }
+      setAuthError(error.message); 
       setLoading(false); 
     } else { 
-      alert('Cadastro realizado! Se você é um professor oficial, suas turmas já aparecerão no painel.'); 
+      setAuthSuccess('Cadastro realizado! Se você é um professor oficial, suas turmas já aparecerão.'); 
       setIsRegistering(false); 
       setLoading(false); 
     }
@@ -142,12 +176,23 @@ const App: React.FC = () => {
 
   const handleResetPassword = async () => {
     if (!emailInput) {
-      alert("Digite seu e-mail primeiro para recuperar a senha.");
+      setAuthError("Digite seu e-mail no campo acima para recuperar a senha.");
       return;
     }
-    const { error } = await supabase.auth.resetPasswordForEmail(emailInput);
-    if (error) alert(error.message);
-    else alert("E-mail de recuperação enviado!");
+    setLoading(true);
+    setAuthError(null);
+    setAuthSuccess(null);
+    
+    const { error } = await supabase.auth.resetPasswordForEmail(emailInput, {
+      redirectTo: window.location.origin,
+    });
+
+    if (error) {
+      setAuthError(error.message);
+    } else {
+      setAuthSuccess("Link de recuperação enviado! Verifique sua caixa de entrada.");
+    }
+    setLoading(false);
   };
 
   const handleAddStudentToClass = async (name: string, classId: string) => {
@@ -183,9 +228,36 @@ const App: React.FC = () => {
   if (loading) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-white gap-4">
       <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-      <p className="font-bold text-indigo-300 tracking-widest animate-pulse uppercase text-xs">Aguarde um instante...</p>
+      <p className="font-bold text-indigo-300 tracking-widest animate-pulse uppercase text-xs">Carregando...</p>
     </div>
   );
+
+  if (isRecovering) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 p-4">
+        <div className="max-w-md w-full bg-white/95 backdrop-blur-sm rounded-[2.5rem] p-10 shadow-2xl border border-white/20">
+          <div className="text-center mb-8">
+             <div className="inline-flex items-center justify-center w-16 h-16 bg-green-600 rounded-3xl text-white font-black text-3xl mb-4">🔑</div>
+             <h1 className="text-3xl font-black text-slate-900 leading-tight">Nova Senha</h1>
+             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-2">Defina sua nova credencial de acesso</p>
+          </div>
+
+          {authError && <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl text-sm font-medium border-l-4 border-red-500">{authError}</div>}
+
+          <form onSubmit={handleUpdatePassword} className="space-y-4">
+            <div className="relative group">
+              <input name="new_password" type="password" required placeholder="Digite a nova senha" title="Mínimo 6 caracteres" className="w-full p-4 pl-12 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all" />
+              <svg className="absolute left-4 top-4 w-5 h-5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+            </div>
+            <button type="submit" className="w-full bg-indigo-600 text-white font-bold py-5 rounded-2xl shadow-lg hover:bg-indigo-700 transition-all active:scale-95">
+              Salvar Nova Senha
+            </button>
+          </form>
+          <button onClick={() => setIsRecovering(false)} className="w-full mt-4 text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-indigo-600">Cancelar e voltar</button>
+        </div>
+      </div>
+    );
+  }
 
   if (!session || !currentUser) {
     return (
@@ -198,19 +270,16 @@ const App: React.FC = () => {
           </div>
 
           {authError && (
-            <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 text-red-700 rounded-xl text-sm font-medium animate-fade-in">
-              <div className="flex gap-2">
-                <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                <span>{authError}</span>
-              </div>
-              {authError.includes('Muitas tentativas') && (
-                <button 
-                  onClick={() => { setIsRegistering(false); setAuthError(null); }}
-                  className="mt-3 w-full bg-red-100 text-red-700 py-2 rounded-lg font-bold hover:bg-red-200 transition-colors"
-                >
-                  Tentar Login agora
-                </button>
-              )}
+            <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 text-red-700 rounded-xl text-sm font-medium animate-fade-in flex gap-2">
+              <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+              <span>{authError}</span>
+            </div>
+          )}
+
+          {authSuccess && (
+            <div className="mb-6 p-4 bg-green-50 border-l-4 border-green-500 text-green-700 rounded-xl text-sm font-medium animate-fade-in flex gap-2">
+              <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <span>{authSuccess}</span>
             </div>
           )}
 
@@ -233,13 +302,6 @@ const App: React.FC = () => {
                 className="w-full p-4 pl-12 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all" 
               />
               <svg className="absolute left-4 top-4 w-5 h-5 text-slate-300 group-focus-within:text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-              
-              {isOfficialEmail && isRegistering && (
-                <div className="mt-2 px-3 py-1 bg-amber-50 text-amber-700 text-[10px] font-bold rounded-lg border border-amber-100 flex items-center gap-1">
-                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
-                  PROFESSOR OFICIAL: Tente o Login, sua conta já deve existir.
-                </div>
-              )}
             </div>
 
             <div className="relative group">
@@ -253,7 +315,7 @@ const App: React.FC = () => {
           </form>
           
           <div className="mt-8 flex flex-col items-center gap-3">
-            <button onClick={() => { setIsRegistering(!isRegistering); setAuthError(null); }} className="text-sm text-slate-400 font-medium hover:text-indigo-600 transition-colors">
+            <button onClick={() => { setIsRegistering(!isRegistering); setAuthError(null); setAuthSuccess(null); }} className="text-sm text-slate-400 font-medium hover:text-indigo-600 transition-colors">
               {isRegistering ? 'Já é cadastrado? ' : 'Ainda não tem conta? '}
               <span className="text-indigo-600 font-bold underline underline-offset-4">{isRegistering ? 'Fazer Login' : 'Cadastre-se'}</span>
             </button>
