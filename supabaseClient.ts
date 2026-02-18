@@ -1,16 +1,43 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-// No Vite, o acesso deve ser estático para substituição em tempo de build
-// Fix: Usando process.env para acessar variáveis de ambiente conforme as diretrizes do ambiente e evitar erros de tipagem
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
+/**
+ * Tenta obter uma variável de ambiente de forma segura, 
+ * verificando tanto o padrão Vite (import.meta.env) quanto o padrão Node/Shims (process.env).
+ */
+const getSafeEnv = (key: string): string | undefined => {
+  try {
+    // Tenta acessar via import.meta.env (Vite)
+    const metaEnv = (import.meta as any).env;
+    if (metaEnv && metaEnv[key]) {
+      return metaEnv[key];
+    }
+  } catch (e) {
+    // Silencia erros de acesso ao import.meta
+  }
 
-if (!supabaseUrl || !supabaseAnonKey || supabaseUrl === 'placeholder') {
-  console.error("ERRO CRÍTICO: Variáveis de ambiente do Supabase não encontradas!");
+  try {
+    // Tenta acessar via process.env (Fallbacks/Shims)
+    if (typeof process !== 'undefined' && process.env && process.env[key]) {
+      return process.env[key];
+    }
+  } catch (e) {
+    // Silencia erros de acesso ao process.env
+  }
+
+  return undefined;
+};
+
+// URL e Key fornecidas pelo usuário
+const DEFAULT_URL = 'https://tipehypcanvwyhcelbsw.supabase.co';
+const DEFAULT_KEY = 'sb_publishable_Prcm8GajRLmx1aHmQ4_e2A_XXAr_yJj';
+
+const supabaseUrl = getSafeEnv('VITE_SUPABASE_URL') || DEFAULT_URL;
+const supabaseAnonKey = getSafeEnv('VITE_SUPABASE_ANON_KEY') || DEFAULT_KEY;
+
+// Verificação de segurança no console para auxílio no debug
+if (supabaseUrl === DEFAULT_URL && !getSafeEnv('VITE_SUPABASE_URL')) {
+  console.warn("Aviso: VITE_SUPABASE_URL não encontrada no ambiente. Usando URL padrão.");
 }
 
-export const supabase = createClient(
-  supabaseUrl || 'https://placeholder-error.supabase.co', 
-  supabaseAnonKey || 'placeholder'
-);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Teacher, Administrator, Class, Student, AttendanceRecord } from './types';
 import TeacherDashboard from './components/TeacherDashboard';
 import ClassDetails from './components/ClassDetails';
@@ -21,24 +21,23 @@ const App: React.FC = () => {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   
   const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [debugInfo, setDebugInfo] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<{message: string, debug?: string} | null>(null);
+
+  // Use useRef to track the mounted status across the component lifecycle safely
+  const isMounted = useRef(true);
 
   useEffect(() => {
-    let mounted = true;
+    isMounted.current = true;
 
     const initSession = async () => {
       try {
-        // Verifica se a URL do supabase é a de placeholder
-        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+        const { data, error } = await supabase.auth.getSession();
         
-        if (error) {
-          setDebugInfo("Erro ao buscar sessão: " + error.message);
-          setLoading(false);
-          return;
-        }
+        if (error) throw error;
 
-        if (mounted) {
+        // Use isMounted.current instead of the local closure variable
+        if (isMounted.current) {
+          const currentSession = data.session;
           setSession(currentSession);
           if (currentSession?.user) {
             await fetchUserProfile(currentSession.user.id);
@@ -47,11 +46,15 @@ const App: React.FC = () => {
           }
         }
       } catch (err: any) {
-        console.error("Erro fatal na inicialização:", err);
-        if (mounted) {
+        console.error("Erro na inicialização:", err);
+        if (isMounted.current) {
           setLoading(false);
-          setAuthError("Falha de conexão. Verifique se as variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY estão corretas no Vercel.");
-          setDebugInfo(err.message);
+          setErrorStatus({
+            message: "Não foi possível conectar ao servidor de dados.",
+            debug: err.message === "Failed to fetch" 
+              ? "Erro de Rede (Failed to Fetch): Verifique sua conexão ou se a URL/Key do Supabase no Vercel estão corretas." 
+              : err.message
+          });
         }
       }
     };
@@ -59,7 +62,8 @@ const App: React.FC = () => {
     initSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-      if (!mounted) return;
+      // Use isMounted.current instead of the local closure variable
+      if (!isMounted.current) return;
       if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && newSession?.user) {
         setSession(newSession);
         await fetchUserProfile(newSession.user.id);
@@ -72,39 +76,42 @@ const App: React.FC = () => {
     });
 
     return () => {
-      mounted = false;
+      // Set to false on cleanup to prevent state updates after unmount
+      isMounted.current = false;
       subscription.unsubscribe();
     };
   }, []);
 
   const fetchUserProfile = async (userId: string) => {
+    // Fix: access isMounted.current instead of the local 'mounted' variable from useEffect scope
+    if (!isMounted.current) return;
     setLoading(true);
-    setAuthError(null);
     try {
-      // Tenta Admin
-      const { data: adminData } = await supabase.from('administrators').select('*').eq('id', userId).maybeSingle();
+      // Busca Admin
+      const { data: adminData, error: adminError } = await supabase.from('administrators').select('*').eq('id', userId).maybeSingle();
       
       if (adminData) {
         setCurrentUser(adminData);
         setUserRole('admin');
         await fetchAllData();
       } else {
-        // Tenta Professor
-        const { data: teacherData } = await supabase.from('teachers').select('*').eq('id', userId).maybeSingle();
+        // Busca Professor
+        const { data: teacherData, error: teacherError } = await supabase.from('teachers').select('*').eq('id', userId).maybeSingle();
         if (teacherData) {
           setCurrentUser(teacherData);
           setUserRole('teacher');
           await fetchData(userId);
         } else {
-          setAuthError("Perfil não encontrado no banco de dados para este usuário.");
-          setDebugInfo("UID Autenticado: " + userId);
+          setErrorStatus({ 
+            message: "Perfil não identificado.", 
+            debug: `Usuário ID ${userId} autenticado mas não consta nas tabelas de professores ou administradores.` 
+          });
           setLoading(false);
         }
       }
     } catch (err: any) {
       console.error("Erro ao carregar perfil:", err);
-      setAuthError("Erro ao acessar tabelas de perfil.");
-      setDebugInfo(err.message);
+      setErrorStatus({ message: "Erro ao carregar seu perfil de usuário.", debug: err.message });
       setLoading(false);
     }
   };
@@ -162,14 +169,14 @@ const App: React.FC = () => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setAuthError(null);
+    setErrorStatus(null);
     const fd = new FormData(e.currentTarget as HTMLFormElement);
     const { error } = await supabase.auth.signInWithPassword({ 
       email: fd.get('email') as string, 
       password: fd.get('password') as string 
     });
     if (error) { 
-      setAuthError(error.message); 
+      setErrorStatus({ message: "Login falhou: E-mail ou senha incorretos.", debug: error.message }); 
       setLoading(false); 
     }
   };
@@ -202,11 +209,11 @@ const App: React.FC = () => {
              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-2">Área de Membros</p>
           </div>
           
-          {authError && (
+          {errorStatus && (
             <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl text-[11px] font-bold border-l-4 border-red-500">
-              <p className="mb-1">{authError}</p>
-              {debugInfo && <p className="text-[9px] opacity-60 font-mono break-all">Erro: {debugInfo}</p>}
-              <button onClick={handleLogout} className="block mt-2 underline text-[10px] uppercase">Tentar outro login</button>
+              <p className="mb-1">{errorStatus.message}</p>
+              {errorStatus.debug && <p className="text-[9px] opacity-60 font-mono break-all mt-1">Detalhes: {errorStatus.debug}</p>}
+              <button onClick={() => window.location.reload()} className="block mt-2 underline text-[10px] uppercase">Recarregar Página</button>
             </div>
           )}
           
