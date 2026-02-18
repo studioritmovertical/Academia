@@ -56,15 +56,19 @@ const App: React.FC = () => {
 
     initSession();
 
+    // Ouve mudanças de autenticação e atualiza o estado da aplicação automaticamente
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (!isMounted.current) return;
+      
       if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && newSession?.user) {
         setSession(newSession);
         await fetchUserProfile(newSession.user.id);
       } else if (event === 'SIGNED_OUT') {
+        // Quando o usuário sai, limpamos todos os estados e o React volta para a tela de login
         setSession(null);
         setCurrentUser(null);
         setUserRole(null);
+        setActiveClassId(null);
         setLoading(false);
       }
     });
@@ -170,12 +174,15 @@ const App: React.FC = () => {
   const handleLogout = async () => {
     setLoading(true);
     try {
+      // Apenas chama o logout do Supabase. 
+      // O useEffect (onAuthStateChange) cuidará de limpar a tela.
       await supabase.auth.signOut();
-      // Redireciona para a origem (limpa a URL de qualquer caminho residual)
-      window.location.href = window.location.origin;
     } catch (err) {
       console.error("Erro ao sair:", err);
-      window.location.reload();
+      // Fallback em caso de erro crítico
+      setSession(null);
+      setCurrentUser(null);
+      setLoading(false);
     }
   };
 
@@ -183,7 +190,7 @@ const App: React.FC = () => {
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-white p-6">
       <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-6"></div>
       <p className="font-black text-xs uppercase tracking-[0.3em] animate-pulse">Ritmo Vertical</p>
-      <p className="mt-2 text-[10px] text-slate-500 font-bold uppercase">Iniciando sistema...</p>
+      <p className="mt-2 text-[10px] text-slate-500 font-bold uppercase">Processando...</p>
     </div>
   );
 
