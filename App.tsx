@@ -22,27 +22,23 @@ const App: React.FC = () => {
   
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [connectionError, setConnectionError] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
 
-    // Timeout de segurança: se em 10 segundos não carregar, libera a tela com erro
-    const securityTimeout = setTimeout(() => {
-      if (mounted && loading) {
-        console.error("Timeout de carregamento atingido.");
-        setLoading(false);
-        setConnectionError(true);
-      }
-    }, 10000);
-    
     const initSession = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) throw error;
+        // Verifica se a URL do supabase é a de placeholder
+        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          setDebugInfo("Erro ao buscar sessão: " + error.message);
+          setLoading(false);
+          return;
+        }
 
         if (mounted) {
-          const currentSession = data.session;
           setSession(currentSession);
           if (currentSession?.user) {
             await fetchUserProfile(currentSession.user.id);
@@ -50,11 +46,12 @@ const App: React.FC = () => {
             setLoading(false);
           }
         }
-      } catch (err) {
-        console.error("Erro na sessão inicial:", err);
+      } catch (err: any) {
+        console.error("Erro fatal na inicialização:", err);
         if (mounted) {
           setLoading(false);
-          setAuthError("Falha na conexão com o servidor de autenticação.");
+          setAuthError("Falha de conexão. Verifique se as variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY estão corretas no Vercel.");
+          setDebugInfo(err.message);
         }
       }
     };
@@ -63,7 +60,6 @@ const App: React.FC = () => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (!mounted) return;
-      
       if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && newSession?.user) {
         setSession(newSession);
         await fetchUserProfile(newSession.user.id);
@@ -72,44 +68,43 @@ const App: React.FC = () => {
         setCurrentUser(null);
         setUserRole(null);
         setLoading(false);
-        setAuthError(null);
       }
     });
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
-      clearTimeout(securityTimeout);
     };
   }, []);
 
   const fetchUserProfile = async (userId: string) => {
-    if (!userId) return;
     setLoading(true);
     setAuthError(null);
     try {
-      // Tenta buscar Admin primeiro
-      const { data: adminData, error: adminError } = await supabase.from('administrators').select('*').eq('id', userId).maybeSingle();
+      // Tenta Admin
+      const { data: adminData } = await supabase.from('administrators').select('*').eq('id', userId).maybeSingle();
       
       if (adminData) {
         setCurrentUser(adminData);
         setUserRole('admin');
         await fetchAllData();
       } else {
-        // Tenta buscar Professor
-        const { data: teacherData, error: teacherError } = await supabase.from('teachers').select('*').eq('id', userId).maybeSingle();
+        // Tenta Professor
+        const { data: teacherData } = await supabase.from('teachers').select('*').eq('id', userId).maybeSingle();
         if (teacherData) {
           setCurrentUser(teacherData);
           setUserRole('teacher');
           await fetchData(userId);
         } else {
-          setAuthError("Usuário autenticado, mas nenhum perfil (Admin ou Professor) foi encontrado para este ID no banco de dados.");
+          setAuthError("Perfil não encontrado no banco de dados para este usuário.");
+          setDebugInfo("UID Autenticado: " + userId);
+          setLoading(false);
         }
       }
-    } catch (err) {
-      console.error("Erro ao buscar perfil:", err);
-      setAuthError("Erro de comunicação com o banco de dados. Verifique as configurações do Supabase.");
-    } finally {
+    } catch (err: any) {
+      console.error("Erro ao carregar perfil:", err);
+      setAuthError("Erro ao acessar tabelas de perfil.");
+      setDebugInfo(err.message);
       setLoading(false);
     }
   };
@@ -134,7 +129,8 @@ const App: React.FC = () => {
       if (attendanceRes.data) setAttendance(attendanceRes.data.map(a => ({
         id: a.id, studentId: a.student_id, classId: a.class_id, date: a.attendance_date, present: a.present
       })));
-    } catch (err) { console.error("Erro ao buscar dados do professor:", err); }
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
   };
 
   const fetchAllData = async () => {
@@ -159,7 +155,8 @@ const App: React.FC = () => {
       if (attendanceRes.data) setAttendance(attendanceRes.data.map(a => ({
         id: a.id, studentId: a.student_id, classId: a.class_id, date: a.attendance_date, present: a.present
       })));
-    } catch (err) { console.error("Erro ao buscar dados administrativos:", err); }
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -167,12 +164,12 @@ const App: React.FC = () => {
     setLoading(true);
     setAuthError(null);
     const fd = new FormData(e.currentTarget as HTMLFormElement);
-    const email = fd.get('email') as string;
-    const password = fd.get('password') as string;
-
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({ 
+      email: fd.get('email') as string, 
+      password: fd.get('password') as string 
+    });
     if (error) { 
-      setAuthError(error.message === "Invalid login credentials" ? "E-mail ou senha incorretos." : error.message); 
+      setAuthError(error.message); 
       setLoading(false); 
     }
   };
@@ -188,9 +185,6 @@ const App: React.FC = () => {
       <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-6"></div>
       <p className="font-black text-xs uppercase tracking-[0.3em] animate-pulse">Ritmo Vertical</p>
       <p className="mt-2 text-[10px] text-slate-500 font-bold uppercase">Sincronizando dados...</p>
-      <div className="mt-12 flex flex-col items-center gap-4">
-        <button onClick={() => window.location.reload()} className="text-[10px] text-slate-600 hover:text-white font-black uppercase underline decoration-indigo-500 underline-offset-4">Forçar Recarregamento</button>
-      </div>
     </div>
   );
 
@@ -208,10 +202,11 @@ const App: React.FC = () => {
              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-2">Área de Membros</p>
           </div>
           
-          {(authError || connectionError) && (
-            <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl text-xs font-bold border-l-4 border-red-500">
-              {connectionError ? "A conexão está demorando mais que o normal. Verifique sua internet ou as variáveis de ambiente no Vercel." : authError}
-              <button onClick={handleLogout} className="block mt-2 underline text-[10px] uppercase">Reiniciar Sistema</button>
+          {authError && (
+            <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl text-[11px] font-bold border-l-4 border-red-500">
+              <p className="mb-1">{authError}</p>
+              {debugInfo && <p className="text-[9px] opacity-60 font-mono break-all">Erro: {debugInfo}</p>}
+              <button onClick={handleLogout} className="block mt-2 underline text-[10px] uppercase">Tentar outro login</button>
             </div>
           )}
           
@@ -230,7 +225,6 @@ const App: React.FC = () => {
             onClick={() => setIsSelfRegistering(true)}
             className="w-full bg-indigo-50 text-indigo-700 font-black py-5 rounded-2xl border-2 border-indigo-100 hover:bg-indigo-100 transition-all flex items-center justify-center gap-2"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
             Quero me Matricular
           </button>
         </div>
@@ -249,12 +243,6 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <div className="text-right hidden sm:block">
-            <div className="text-sm font-black text-slate-900 leading-none">{currentUser.name}</div>
-            <div className="text-[10px] text-indigo-500 font-bold uppercase mt-1">
-                {userRole === 'admin' ? 'Diretor' : (currentUser as Teacher).modality}
-            </div>
-          </div>
           <button onClick={handleLogout} className="px-4 py-2 text-slate-400 hover:text-red-500 font-bold text-xs uppercase transition-colors">Sair</button>
         </div>
       </header>
@@ -293,11 +281,8 @@ const App: React.FC = () => {
                 }}
                 onToggleAttendance={async (sid, cid, d) => {
                   const existing = attendance.find(a => a.studentId === sid && a.classId === cid && a.date === d);
-                  if (existing) {
-                    await supabase.from('attendance').delete().eq('id', existing.id);
-                  } else {
-                    await supabase.from('attendance').insert([{ student_id: sid, class_id: cid, attendance_date: d, present: true }]);
-                  }
+                  if (existing) await supabase.from('attendance').delete().eq('id', existing.id);
+                  else await supabase.from('attendance').insert([{ student_id: sid, class_id: cid, attendance_date: d, present: true }]);
                   fetchAllData();
                 }}
             />
@@ -321,13 +306,10 @@ const App: React.FC = () => {
                    fetchData(currentUser!.id);
                 }}
                 onToggleAttendance={async (sid, cid, d) => {
-                  const existing = attendance.find(a => a.studentId === sid && a.classId === cid && a.date === d);
-                  if (existing) {
-                    await supabase.from('attendance').delete().eq('id', existing.id);
-                  } else {
-                    await supabase.from('attendance').insert([{ student_id: sid, class_id: cid, attendance_date: d, present: true }]);
-                  }
-                  fetchData(currentUser!.id);
+                   const existing = attendance.find(a => a.studentId === sid && a.classId === cid && a.date === d);
+                   if (existing) await supabase.from('attendance').delete().eq('id', existing.id);
+                   else await supabase.from('attendance').insert([{ student_id: sid, class_id: cid, attendance_date: d, present: true }]);
+                   fetchData(currentUser!.id);
                 }}
             />
           )
