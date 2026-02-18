@@ -4,6 +4,7 @@ import { Teacher, Administrator, Class, Student, AttendanceRecord } from './type
 import TeacherDashboard from './components/TeacherDashboard';
 import ClassDetails from './components/ClassDetails';
 import AdminDashboard from './components/AdminDashboard';
+import StudentSelfRegistration from './components/StudentSelfRegistration';
 import { supabase } from './supabaseClient';
 
 const App: React.FC = () => {
@@ -11,6 +12,7 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<Teacher | Administrator | null>(null);
   const [userRole, setUserRole] = useState<'teacher' | 'admin' | null>(null);
   const [activeClassId, setActiveClassId] = useState<string | null>(null);
+  const [isSelfRegistering, setIsSelfRegistering] = useState(false);
   
   const [classes, setClasses] = useState<Class[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -19,42 +21,25 @@ const App: React.FC = () => {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   
   const [loading, setLoading] = useState(true);
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [isRecovering, setIsRecovering] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [authSuccess, setAuthSuccess] = useState<string | null>(null);
-  const [emailInput, setEmailInput] = useState('');
 
   useEffect(() => {
     let mounted = true;
-
     const initSession = async () => {
       try {
-        console.log("Iniciando verificação de sessão...");
-        const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) throw sessionError;
-
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
         if (mounted) {
           setSession(currentSession);
-          if (currentSession?.user) {
-            console.log("Usuário autenticado:", currentSession.user.email);
-            await fetchUserProfile(currentSession.user.id);
-          } else {
-            console.log("Nenhum usuário logado.");
-            setLoading(false);
-          }
+          if (currentSession?.user) await fetchUserProfile(currentSession.user.id);
+          else setLoading(false);
         }
       } catch (err) {
-        console.error("Erro ao iniciar sessão:", err);
         if (mounted) setLoading(false);
       }
     };
-
     initSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-      console.log("Mudança de estado Auth:", event);
       if (mounted) {
         setSession(newSession);
         if (event === 'SIGNED_OUT') {
@@ -74,58 +59,35 @@ const App: React.FC = () => {
   }, []);
 
   const fetchUserProfile = async (userId: string) => {
-    if (!userId) return;
     setLoading(true);
-    setAuthError(null);
-    
     try {
-      console.log("Buscando perfil para ID:", userId);
-      
-      // 1. Tenta Administrador
-      const { data: adminData, error: adminError } = await supabase
-        .from('administrators')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
+      const { data: adminData } = await supabase.from('administrators').select('*').eq('id', userId).maybeSingle();
       if (adminData) {
-        console.log("Perfil Administrador encontrado.");
         setCurrentUser(adminData);
         setUserRole('admin');
         await fetchAllData();
-        return;
-      }
-
-      // 2. Tenta Professor
-      const { data: teacherData, error: teacherError } = await supabase
-        .from('teachers')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (teacherData) {
-        console.log("Perfil Professor encontrado.");
-        setCurrentUser(teacherData);
-        setUserRole('teacher');
-        await fetchData(userId);
       } else {
-        console.warn("Perfil não encontrado nas tabelas de negócio.");
-        setAuthError("Perfil não encontrado. Se você acabou de se cadastrar, aguarde a liberação ou contate o suporte.");
+        const { data: teacherData } = await supabase.from('teachers').select('*').eq('id', userId).maybeSingle();
+        if (teacherData) {
+          setCurrentUser(teacherData);
+          setUserRole('teacher');
+          await fetchData(userId);
+        } else {
+          setAuthError("Perfil não encontrado. Contate a administração.");
+        }
       }
     } catch (err) {
-      console.error("Erro crítico ao carregar perfil:", err);
-      setAuthError("Erro de conexão com o banco de dados.");
+      setAuthError("Erro de conexão.");
     } finally {
       setLoading(false);
     }
   };
 
   const fetchData = async (userId: string) => {
-    console.log("Carregando dados do professor...");
     try {
       const [classesRes, studentsRes, enrollRes, attendanceRes] = await Promise.all([
         supabase.from('classes').select('*').eq('teacher_id', userId),
-        supabase.from('students').select('*').eq('teacher_id', userId),
+        supabase.from('students').select('*'),
         supabase.from('student_classes').select('*'),
         supabase.from('attendance').select('*')
       ]);
@@ -135,19 +97,16 @@ const App: React.FC = () => {
         startTime: c.start_time, endTime: c.end_time, description: c.description
       })));
       if (studentsRes.data) setStudents(studentsRes.data.map(s => ({
-        id: s.id, teacherId: s.teacher_id, name: s.name, active: s.active
+        id: s.id, teacherId: '', name: s.name, active: s.active
       })));
       if (enrollRes.data) setEnrollments(enrollRes.data);
       if (attendanceRes.data) setAttendance(attendanceRes.data.map(a => ({
         id: a.id, studentId: a.student_id, classId: a.class_id, date: a.attendance_date, present: a.present
       })));
-    } catch (err) {
-      console.error("Erro ao buscar dados do professor:", err);
-    }
+    } catch (err) { console.error(err); }
   };
 
   const fetchAllData = async () => {
-    console.log("Carregando dados globais (Admin)...");
     try {
       const [teachersRes, classesRes, studentsRes, enrollRes, attendanceRes] = await Promise.all([
         supabase.from('teachers').select('*'),
@@ -163,122 +122,128 @@ const App: React.FC = () => {
         startTime: c.start_time, endTime: c.end_time, description: c.description
       })));
       if (studentsRes.data) setStudents(studentsRes.data.map(s => ({
-        id: s.id, teacherId: s.teacher_id, name: s.name, active: s.active
+        id: s.id, teacherId: '', name: s.name, active: s.active
       })));
       if (enrollRes.data) setEnrollments(enrollRes.data);
       if (attendanceRes.data) setAttendance(attendanceRes.data.map(a => ({
         id: a.id, studentId: a.student_id, classId: a.class_id, date: a.attendance_date, present: a.present
       })));
-    } catch (err) {
-      console.error("Erro ao buscar dados globais:", err);
-    }
+    } catch (err) { console.error(err); }
+  };
+
+  const handleAddStudent = async (name: string, classId: string) => {
+    try {
+      const { data: newStudent, error: sError } = await supabase.from('students').insert([{ name }]).select().single();
+      if (sError) throw sError;
+      const { error: eError } = await supabase.from('student_classes').insert([{ student_id: newStudent.id, class_id: classId }]);
+      if (eError) throw eError;
+      if (userRole === 'admin') await fetchAllData();
+      else await fetchData(currentUser!.id);
+    } catch (err: any) { alert("Erro ao cadastrar aluno: " + err.message); }
+  };
+
+  const handleDeleteStudent = async (studentId: string) => {
+    if (!confirm("Remover aluno desta turma?")) return;
+    try {
+      const { error } = await supabase.from('student_classes').delete().match({ student_id: studentId, class_id: activeClassId });
+      if (error) throw error;
+      if (userRole === 'admin') await fetchAllData();
+      else await fetchData(currentUser!.id);
+    } catch (err: any) { alert("Erro ao remover: " + err.message); }
+  };
+
+  const handleToggleAttendance = async (studentId: string, classId: string, date: string) => {
+    try {
+      const existing = attendance.find(a => a.studentId === studentId && a.classId === classId && a.date === date);
+      if (existing) {
+        await supabase.from('attendance').delete().eq('id', existing.id);
+      } else {
+        await supabase.from('attendance').insert([{
+          student_id: studentId,
+          class_id: classId,
+          attendance_date: date,
+          present: true
+        }]);
+      }
+      if (userRole === 'admin') await fetchAllData();
+      else await fetchData(currentUser!.id);
+    } catch (err: any) { console.error(err); }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setAuthError(null);
     const fd = new FormData(e.currentTarget as HTMLFormElement);
-    const email = fd.get('email') as string;
-    const password = fd.get('password') as string;
-
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    
-    if (error) { 
-      setAuthError(error.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : error.message); 
-      setLoading(false); 
-    }
+    const { error } = await supabase.auth.signInWithPassword({ 
+      email: fd.get('email') as string, 
+      password: fd.get('password') as string 
+    });
+    if (error) { setAuthError("E-mail ou senha incorretos."); setLoading(false); }
   };
 
   const handleLogout = async () => {
     setLoading(true);
     await supabase.auth.signOut();
-    setCurrentUser(null);
-    setUserRole(null);
-    setLoading(false);
   };
 
-  // ... (restante das funções de handleAddStudent, etc., permanecem iguais)
-
   if (loading) return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-white gap-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-white">
       <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-      <p className="font-bold text-indigo-300 tracking-widest animate-pulse uppercase text-xs">Carregando Sistema...</p>
-      <button 
-        onClick={() => window.location.reload()} 
-        className="mt-4 text-[10px] text-slate-500 hover:text-white uppercase font-black"
-      >
-        Recarregar Página
-      </button>
+      <p className="mt-4 font-bold text-xs uppercase tracking-widest animate-pulse">Ritmo Vertical...</p>
     </div>
   );
 
-  // Se não tem sessão ou não tem perfil carregado, mostra tela de login
+  if (isSelfRegistering) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
+        <StudentSelfRegistration onBack={() => setIsSelfRegistering(false)} />
+      </div>
+    );
+  }
+
   if (!session || !currentUser) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 p-4">
-        <div className="max-w-md w-full bg-white/95 backdrop-blur-sm rounded-[2.5rem] p-10 shadow-2xl">
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
+        <div className="max-w-md w-full bg-white rounded-[2.5rem] p-10 shadow-2xl">
           <div className="text-center mb-8">
-             <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-3xl text-white font-black text-3xl mb-4">R</div>
-             <h1 className="text-3xl font-black text-slate-900">Ritmo Vertical</h1>
-             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-2">Acesso Restrito</p>
+             <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl text-white font-black text-3xl mb-4">R</div>
+             <h1 className="text-2xl font-black text-slate-900 leading-tight">Ritmo Vertical</h1>
+             <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-2">Área de Membros</p>
           </div>
           
-          {authError && (
-            <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl text-sm font-medium border-l-4 border-red-500">
-              {authError}
-              {session && !currentUser && (
-                <button 
-                  onClick={handleLogout}
-                  className="block mt-2 text-indigo-600 font-black hover:underline"
-                >
-                  Tentar com outra conta
-                </button>
-              )}
-            </div>
-          )}
+          {authError && <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl text-xs font-bold border-l-4 border-red-500">{authError}</div>}
           
-          {!session ? (
-            <form onSubmit={isRegistering ? async (e) => {
-              e.preventDefault();
-              setLoading(true);
-              const fd = new FormData(e.currentTarget);
-              const { error } = await supabase.auth.signUp({
-                email: fd.get('email') as string,
-                password: fd.get('password') as string,
-                options: { data: { name: fd.get('name') as string } }
-              });
-              if (error) { setAuthError(error.message); setLoading(false); }
-              else { setAuthSuccess('Verifique seu e-mail!'); setIsRegistering(false); setLoading(false); }
-            } : handleLogin} className="space-y-4">
-              {isRegistering && <input name="name" required placeholder="Nome Completo" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500" />}
-              <input name="email" type="email" required placeholder="E-mail" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500" />
-              <input name="password" type="password" required placeholder="Senha" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500" />
-              <button type="submit" className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-lg hover:bg-indigo-700">
-                {isRegistering ? 'Cadastrar' : 'Entrar'}
-              </button>
-            </form>
-          ) : null}
-          
-          <div className="mt-8 flex flex-col items-center gap-3">
-            <button onClick={() => setIsRegistering(!isRegistering)} className="text-sm text-slate-400 font-medium">
-              {isRegistering ? 'Já tem conta? Fazer Login' : 'Ainda não tem conta? Cadastre-se'}
-            </button>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <input name="email" type="email" required placeholder="E-mail do Professor/Admin" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 font-medium" />
+            <input name="password" type="password" required placeholder="Senha" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 font-medium" />
+            <button type="submit" className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl shadow-lg hover:bg-black transition-all">Acessar Painel</button>
+          </form>
+
+          <div className="relative my-8">
+             <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-100"></div></div>
+             <div className="relative flex justify-center text-xs font-black uppercase tracking-widest"><span className="bg-white px-4 text-slate-400">Ou</span></div>
           </div>
+
+          <button 
+            onClick={() => setIsSelfRegistering(true)}
+            className="w-full bg-indigo-50 text-indigo-700 font-black py-5 rounded-2xl border-2 border-indigo-100 hover:bg-indigo-100 transition-all flex items-center justify-center gap-2"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
+            Quero me Matricular
+          </button>
         </div>
       </div>
     );
   }
 
-  // Se chegou aqui, temos sessão e currentUser
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white/80 backdrop-blur-md border-b border-slate-100 p-4 flex justify-between items-center sticky top-0 z-50">
-        <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveClassId(null)}>
+        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveClassId(null)}>
           <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-black text-xl">R</div>
           <div className="hidden sm:block">
-            <div className="font-black text-slate-900 text-lg uppercase leading-none">Ritmo Vertical</div>
-            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{userRole === 'admin' ? 'Gestão Administrativa' : 'Painel do Professor'}</div>
+            <div className="font-black text-slate-900 uppercase leading-none">Ritmo Vertical</div>
+            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{userRole === 'admin' ? 'Gestão Administrativa' : 'Painel Docente'}</div>
           </div>
         </div>
         <div className="flex items-center gap-4">
@@ -288,7 +253,7 @@ const App: React.FC = () => {
                 {userRole === 'admin' ? 'Diretor' : (currentUser as Teacher).modality}
             </div>
           </div>
-          <button onClick={handleLogout} className="px-4 py-2 text-slate-400 hover:text-red-500 font-bold text-xs uppercase tracking-wider transition-colors">Sair</button>
+          <button onClick={handleLogout} className="px-4 py-2 text-slate-400 hover:text-red-500 font-bold text-xs uppercase transition-colors">Sair</button>
         </div>
       </header>
 
@@ -303,7 +268,7 @@ const App: React.FC = () => {
                 attendance={attendance}
                 enrollments={enrollments}
                 onSelectClass={setActiveClassId}
-                onAddStudentToClass={(name, cid) => {}} // Implementar logicamente se necessário
+                onAddStudentToClass={handleAddStudent}
                 onRefresh={fetchAllData}
             />
           ) : (
@@ -312,9 +277,9 @@ const App: React.FC = () => {
                 students={students.filter(s => enrollments.some(e => e.student_id === s.id && e.class_id === activeClassId))}
                 attendance={attendance}
                 onBack={() => setActiveClassId(null)}
-                onAddStudent={(n, cid) => {}} 
-                onDeleteStudent={(id) => {}}
-                onToggleAttendance={(sid, cid, d) => {}}
+                onAddStudent={handleAddStudent} 
+                onDeleteStudent={handleDeleteStudent}
+                onToggleAttendance={handleToggleAttendance}
             />
           )
         ) : (
@@ -326,9 +291,9 @@ const App: React.FC = () => {
                 students={students.filter(s => enrollments.some(e => e.student_id === s.id && e.class_id === activeClassId))}
                 attendance={attendance}
                 onBack={() => setActiveClassId(null)}
-                onAddStudent={(n, cid) => {}}
-                onDeleteStudent={(id) => {}}
-                onToggleAttendance={(sid, cid, d) => {}}
+                onAddStudent={handleAddStudent}
+                onDeleteStudent={handleDeleteStudent}
+                onToggleAttendance={handleToggleAttendance}
             />
           )
         )}

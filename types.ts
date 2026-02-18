@@ -24,8 +24,10 @@ export interface Class {
 
 export interface Student {
   id: string;
-  teacherId: string;
   name: string;
+  email?: string;
+  phone?: string;
+  photo_url?: string;
   active: boolean;
 }
 

@@ -34,15 +34,15 @@ export const INITIAL_CLASSES: Class[] = [
   { id: 'gr3', teacherId: '4', name: 'Turma 03', scheduleDays: [1, 3], startTime: '17:30', endTime: '18:30', description: '2x por semana' },
   { id: 'gr4', teacherId: '4', name: 'Turma 04', scheduleDays: [1, 3], startTime: '18:30', endTime: '19:30', description: '2x por semana' },
   
-  // Nathalia Dias - Ballet
-  { id: 'bn1', teacherId: '5', name: 'Baby - Turma 01', scheduleDays: [2], startTime: '18:00', endTime: '18:50', description: '1x por semana' },
-  { id: 'bn2', teacherId: '5', name: 'Pré-infantil - Turma 02', scheduleDays: [2], startTime: '19:00', endTime: '19:50', description: '1x por semana' },
-  { id: 'bn3', teacherId: '5', name: 'Infantil - Turma 03', scheduleDays: [2], startTime: '20:00', endTime: '21:00', description: '1x por semana' },
+  // Nathalia Dias - Ballet (Terças-feiras)
+  { id: 'bn1', teacherId: '5', name: 'Ballet Baby', scheduleDays: [2], startTime: '18:00', endTime: '18:50', description: '1x por semana' },
+  { id: 'bn2', teacherId: '5', name: 'Ballet Pré-Infantil', scheduleDays: [2], startTime: '19:00', endTime: '19:50', description: '1x por semana' },
+  { id: 'bn3', teacherId: '5', name: 'Ballet Infantil', scheduleDays: [2], startTime: '20:00', endTime: '21:00', description: '1x por semana' },
   
-  // Gaby Roxa - Ballet
-  { id: 'bg1', teacherId: '6', name: 'Baby - Turma 01', scheduleDays: [4], startTime: '18:00', endTime: '18:50', description: '1x por semana' },
-  { id: 'bg2', teacherId: '6', name: 'Pré-infantil - Turma 02', scheduleDays: [4], startTime: '19:00', endTime: '19:50', description: '1x por semana' },
-  { id: 'bg3', teacherId: '6', name: 'Infantil - Turma 03', scheduleDays: [4], startTime: '20:00', endTime: '21:00', description: '1x por semana' },
+  // Gaby Roxa - Ballet (Quintas-feiras)
+  { id: 'bg1', teacherId: '6', name: 'Ballet Baby', scheduleDays: [4], startTime: '18:00', endTime: '18:50', description: '1x por semana' },
+  { id: 'bg2', teacherId: '6', name: 'Ballet Pré-Infantil', scheduleDays: [4], startTime: '19:00', endTime: '19:50', description: '1x por semana' },
+  { id: 'bg3', teacherId: '6', name: 'Ballet Infantil', scheduleDays: [4], startTime: '20:00', endTime: '21:00', description: '1x por semana' },
   
   // Jaqueline Resplandes - Pilates
   { id: 'p1', teacherId: '7', name: 'Turma 01', scheduleDays: [2, 4], startTime: '18:00', endTime: '19:00', description: '2x por semana' },
