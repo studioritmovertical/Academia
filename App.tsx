@@ -25,30 +25,39 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let mounted = true;
+    
     const initSession = async () => {
       try {
-        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+        if (error) throw error;
+
         if (mounted) {
           setSession(currentSession);
-          if (currentSession?.user) await fetchUserProfile(currentSession.user.id);
-          else setLoading(false);
+          if (currentSession?.user) {
+            await fetchUserProfile(currentSession.user.id);
+          } else {
+            setLoading(false);
+          }
         }
       } catch (err) {
+        console.error("Erro na sessão:", err);
         if (mounted) setLoading(false);
       }
     };
+
     initSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-      if (mounted) {
+      if (!mounted) return;
+      
+      if (event === 'SIGNED_IN' && newSession?.user) {
         setSession(newSession);
-        if (event === 'SIGNED_OUT') {
-          setCurrentUser(null);
-          setUserRole(null);
-          setLoading(false);
-        } else if (newSession?.user) {
-          await fetchUserProfile(newSession.user.id);
-        }
+        await fetchUserProfile(newSession.user.id);
+      } else if (event === 'SIGNED_OUT') {
+        setSession(null);
+        setCurrentUser(null);
+        setUserRole(null);
+        setLoading(false);
       }
     });
 
@@ -60,24 +69,29 @@ const App: React.FC = () => {
 
   const fetchUserProfile = async (userId: string) => {
     setLoading(true);
+    setAuthError(null);
     try {
-      const { data: adminData } = await supabase.from('administrators').select('*').eq('id', userId).maybeSingle();
-      if (adminData) {
-        setCurrentUser(adminData);
+      // Busca em paralelo para ser mais rápido
+      const [adminRes, teacherRes] = await Promise.all([
+        supabase.from('administrators').select('*').eq('id', userId).maybeSingle(),
+        supabase.from('teachers').select('*').eq('id', userId).maybeSingle()
+      ]);
+
+      if (adminRes.data) {
+        setCurrentUser(adminRes.data);
         setUserRole('admin');
         await fetchAllData();
+      } else if (teacherRes.data) {
+        setCurrentUser(teacherRes.data);
+        setUserRole('teacher');
+        await fetchData(userId);
       } else {
-        const { data: teacherData } = await supabase.from('teachers').select('*').eq('id', userId).maybeSingle();
-        if (teacherData) {
-          setCurrentUser(teacherData);
-          setUserRole('teacher');
-          await fetchData(userId);
-        } else {
-          setAuthError("Perfil não encontrado. Contate a administração.");
-        }
+        setAuthError("Perfil não encontrado. Verifique se o ID no banco coincide com o ID de autenticação.");
+        console.warn("Usuário logado mas sem perfil correspondente no banco (ID):", userId);
       }
     } catch (err) {
-      setAuthError("Erro de conexão.");
+      console.error("Erro ao buscar perfil:", err);
+      setAuthError("Erro de comunicação com o servidor.");
     } finally {
       setLoading(false);
     }
@@ -97,7 +111,7 @@ const App: React.FC = () => {
         startTime: c.start_time, endTime: c.end_time, description: c.description
       })));
       if (studentsRes.data) setStudents(studentsRes.data.map(s => ({
-        id: s.id, teacherId: '', name: s.name, active: s.active
+        id: s.id, name: s.name, active: s.active ?? true, email: s.email, phone: s.phone, photo_url: s.photo_url
       })));
       if (enrollRes.data) setEnrollments(enrollRes.data);
       if (attendanceRes.data) setAttendance(attendanceRes.data.map(a => ({
@@ -122,7 +136,7 @@ const App: React.FC = () => {
         startTime: c.start_time, endTime: c.end_time, description: c.description
       })));
       if (studentsRes.data) setStudents(studentsRes.data.map(s => ({
-        id: s.id, teacherId: '', name: s.name, active: s.active
+        id: s.id, name: s.name, active: s.active ?? true, email: s.email, phone: s.phone, photo_url: s.photo_url
       })));
       if (enrollRes.data) setEnrollments(enrollRes.data);
       if (attendanceRes.data) setAttendance(attendanceRes.data.map(a => ({
@@ -173,12 +187,17 @@ const App: React.FC = () => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setAuthError(null);
     const fd = new FormData(e.currentTarget as HTMLFormElement);
-    const { error } = await supabase.auth.signInWithPassword({ 
-      email: fd.get('email') as string, 
-      password: fd.get('password') as string 
-    });
-    if (error) { setAuthError("E-mail ou senha incorretos."); setLoading(false); }
+    const email = fd.get('email') as string;
+    const password = fd.get('password') as string;
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    
+    if (error) { 
+      setAuthError(error.message === "Invalid login credentials" ? "E-mail ou senha incorretos." : error.message); 
+      setLoading(false); 
+    }
   };
 
   const handleLogout = async () => {
@@ -189,14 +208,18 @@ const App: React.FC = () => {
   if (loading) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-white">
       <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-      <p className="mt-4 font-bold text-xs uppercase tracking-widest animate-pulse">Ritmo Vertical...</p>
+      <p className="mt-4 font-bold text-xs uppercase tracking-widest animate-pulse">Sincronizando Studio...</p>
     </div>
   );
 
   if (isSelfRegistering) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
-        <StudentSelfRegistration onBack={() => setIsSelfRegistering(false)} />
+        <StudentSelfRegistration onBack={() => {
+          setIsSelfRegistering(false);
+          if (userRole === 'admin') fetchAllData();
+          else if (currentUser) fetchData(currentUser.id);
+        }} />
       </div>
     );
   }
@@ -211,11 +234,16 @@ const App: React.FC = () => {
              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-2">Área de Membros</p>
           </div>
           
-          {authError && <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl text-xs font-bold border-l-4 border-red-500">{authError}</div>}
+          {authError && (
+            <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl text-xs font-bold border-l-4 border-red-500">
+              {authError}
+              <button onClick={handleLogout} className="block mt-2 underline text-[10px] uppercase">Tentar outro login</button>
+            </div>
+          )}
           
           <form onSubmit={handleLogin} className="space-y-4">
-            <input name="email" type="email" required placeholder="E-mail do Professor/Admin" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 font-medium" />
-            <input name="password" type="password" required placeholder="Senha" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 font-medium" />
+            <input name="email" type="email" required placeholder="E-mail" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 font-medium" />
+            <input name="password" type="password" required placeholder="Senha" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 font-medium" />
             <button type="submit" className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl shadow-lg hover:bg-black transition-all">Acessar Painel</button>
           </form>
 

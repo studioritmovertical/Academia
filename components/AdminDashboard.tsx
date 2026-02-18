@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Administrator, Teacher, Class, Student, AttendanceRecord } from '../types';
-import { WEEKDAY_LABELS, INITIAL_TEACHERS, INITIAL_CLASSES } from '../constants';
+import { WEEKDAY_LABELS } from '../constants';
 import { supabase } from '../supabaseClient';
 
 interface AdminDashboardProps {
@@ -23,7 +23,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>('all');
-  const [syncing, setSyncing] = useState(false);
 
   const filteredClasses = useMemo(() => {
     if (selectedTeacherId === 'all') return classes;
@@ -36,20 +35,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     classes: classes.length,
     avgAttendance: attendance.length > 0 ? Math.round((attendance.filter(a => a.present).length / attendance.length) * 100) : 0
   }), [teachers, students, classes, attendance]);
-
-  const handleSyncData = async () => {
-    if (!confirm("Isso irá tentar sincronizar as turmas e professores padrão para o banco de dados. Deseja continuar?")) return;
-    setSyncing(true);
-    try {
-      // Nota: Para sincronizar professores, eles precisam de IDs reais do Auth. 
-      // Esta função foca em cadastrar as turmas se o professor já existir.
-      // Como não podemos criar usuários Auth via SQL simples sem permissão, avisaremos.
-      alert("Para sincronizar, primeiro certifique-se de que os professores foram criados no painel de Autenticação do Supabase com os e-mails corretos.");
-      onRefresh();
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const monthlyReport = useMemo(() => {
     return filteredClasses.map(cls => {
@@ -74,11 +59,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   return (
     <div className="animate-fade-in space-y-10">
-      {/* Header Admin */}
       <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
         <div>
           <h2 className="text-3xl font-black text-slate-900 tracking-tight leading-none">Painel Diretor</h2>
-          <p className="text-slate-500 font-medium mt-2">Gestão centralizada do Studio Ritmo Vertical.</p>
+          <p className="text-slate-500 font-medium mt-2">Bem-vindo, {admin.name}.</p>
         </div>
         
         <div className="flex bg-slate-100 p-1.5 rounded-2xl shadow-inner">
@@ -121,8 +105,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
             )) : (
               <div className="col-span-full py-20 text-center bg-white border-2 border-dashed border-slate-100 rounded-[3rem]">
-                 <p className="text-slate-400 font-bold">Nenhuma turma encontrada no banco de dados.</p>
-                 <p className="text-slate-400 text-xs mt-1">Crie turmas na aba "Gestão" ou peça aos professores para criarem em seus painéis.</p>
+                 <p className="text-slate-400 font-bold">Nenhuma turma encontrada.</p>
               </div>
             )}
           </div>
@@ -130,9 +113,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {activeTab === 'reports' && (
-        <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden animate-fade-in">
           <div className="p-10 border-b border-slate-50 bg-slate-50/50 flex flex-col md:flex-row justify-between gap-6">
-            <h3 className="text-2xl font-black text-slate-900 leading-none">Relatórios de Frequência</h3>
+            <h3 className="text-2xl font-black text-slate-900 leading-none">Frequência Mensal</h3>
             <div className="flex flex-wrap gap-3">
               <select value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))} className="p-3 bg-white border border-slate-200 rounded-xl font-bold text-sm outline-none">
                 {["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"].map((m, i) => (
@@ -147,35 +130,37 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
           <div className="p-10">
              {monthlyReport.length > 0 ? (
-                <table className="w-full text-left">
-                    <thead>
-                      <tr className="text-[10px] text-slate-400 font-black uppercase tracking-widest border-b border-slate-100">
-                        <th className="pb-4">Turma / Professor</th>
-                        <th className="pb-4">Alunos</th>
-                        <th className="pb-4">Chamadas</th>
-                        <th className="pb-4">Presença</th>
-                        <th className="pb-4 text-right">Taxa (%)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                       {monthlyReport.map(item => (
-                         <tr key={item.id} className="group hover:bg-slate-50 transition-colors">
-                            <td className="py-6">
-                               <div className="font-black text-slate-900">{item.name}</div>
-                               <div className="text-xs text-slate-400 font-medium">{item.teacher}</div>
-                            </td>
-                            <td className="py-6 text-sm font-bold text-slate-600">{item.students}</td>
-                            <td className="py-6 text-sm font-bold text-slate-600">{item.potential}</td>
-                            <td className="py-6 text-sm font-bold text-green-600">{item.presences}</td>
-                            <td className="py-6 text-right">
-                               <span className={`px-4 py-2 rounded-xl font-black text-xs ${item.rate >= 75 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                 {item.rate}%
-                               </span>
-                            </td>
-                         </tr>
-                       ))}
-                    </tbody>
-                </table>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                      <thead>
+                        <tr className="text-[10px] text-slate-400 font-black uppercase tracking-widest border-b border-slate-100">
+                          <th className="pb-4">Turma / Professor</th>
+                          <th className="pb-4">Alunos</th>
+                          <th className="pb-4">Chamadas</th>
+                          <th className="pb-4">Presença</th>
+                          <th className="pb-4 text-right">Taxa (%)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                         {monthlyReport.map(item => (
+                           <tr key={item.id} className="group hover:bg-slate-50 transition-colors">
+                              <td className="py-6">
+                                 <div className="font-black text-slate-900">{item.name}</div>
+                                 <div className="text-xs text-slate-400 font-medium">{item.teacher}</div>
+                              </td>
+                              <td className="py-6 text-sm font-bold text-slate-600">{item.students}</td>
+                              <td className="py-6 text-sm font-bold text-slate-600">{item.potential}</td>
+                              <td className="py-6 text-sm font-bold text-green-600">{item.presences}</td>
+                              <td className="py-6 text-right">
+                                 <span className={`px-4 py-2 rounded-xl font-black text-xs ${item.rate >= 75 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                   {item.rate}%
+                                 </span>
+                              </td>
+                           </tr>
+                         ))}
+                      </tbody>
+                  </table>
+                </div>
              ) : (
                <div className="text-center py-20 text-slate-400 font-bold">Sem dados para este período.</div>
              )}
@@ -184,10 +169,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {activeTab === 'management' && (
-        <div className="space-y-10">
+        <div className="space-y-10 animate-fade-in">
           <div className="bg-indigo-600 p-10 rounded-[2.5rem] shadow-xl shadow-indigo-100 text-white relative overflow-hidden">
              <div className="relative z-10">
-                <h3 className="text-2xl font-black mb-6">Matrícula Global Administrativa</h3>
+                <h3 className="text-2xl font-black mb-6">Matrícula Direta</h3>
                 <form onSubmit={e => {
                   e.preventDefault();
                   const fd = new FormData(e.currentTarget as HTMLFormElement);
@@ -205,23 +190,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm">
-             <h3 className="text-xl font-black text-slate-900 mb-2">Configurações do Sistema</h3>
-             <p className="text-slate-400 font-medium mb-8">Utilize as ferramentas abaixo para manter o Studio em ordem.</p>
+             <h3 className="text-xl font-black text-slate-900 mb-2">Opções do Sistema</h3>
+             <p className="text-slate-400 font-medium mb-8">Gestão de dados e sincronização.</p>
              
              <div className="flex flex-wrap gap-4">
                 <button 
-                   onClick={handleSyncData}
-                   disabled={syncing}
-                   className="bg-slate-50 border border-slate-200 text-slate-700 font-bold px-6 py-3 rounded-xl hover:bg-slate-100 transition-all flex items-center gap-2"
+                   onClick={onRefresh}
+                   className="bg-indigo-50 text-indigo-700 font-bold px-8 py-4 rounded-2xl hover:bg-indigo-100 transition-all flex items-center gap-2"
                 >
                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                   {syncing ? 'Sincronizando...' : 'Sincronizar Turmas Padrão'}
-                </button>
-                <button 
-                   onClick={onRefresh}
-                   className="bg-indigo-50 text-indigo-700 font-bold px-6 py-3 rounded-xl hover:bg-indigo-100 transition-all"
-                >
-                   Recarregar Dados
+                   Recarregar Banco de Dados
                 </button>
              </div>
           </div>
