@@ -13,11 +13,12 @@ interface AdminDashboardProps {
   enrollments: { student_id: string, class_id: string }[];
   onSelectClass: (id: string) => void;
   onAddStudentToClass: (name: string, classId: string, teacherId?: string) => void;
+  onAddClass: (classData: any) => void;
   onRefresh: () => void;
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
-  admin, teachers, classes, students, attendance, enrollments, onSelectClass, onAddStudentToClass, onRefresh 
+  admin, teachers, classes, students, attendance, enrollments, onSelectClass, onAddStudentToClass, onAddClass, onRefresh 
 }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'management'>('overview');
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
@@ -187,6 +188,50 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <button type="submit" className="bg-slate-900 text-white font-black p-4 rounded-2xl hover:bg-black transition-all">Efetivar Matrícula</button>
                 </form>
              </div>
+          </div>
+
+          <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm">
+             <h3 className="text-xl font-black text-slate-900 mb-2">Nova Turma</h3>
+             <p className="text-slate-400 font-medium mb-8">Cadastre uma nova modalidade ou horário.</p>
+             
+             <form onSubmit={e => {
+               e.preventDefault();
+               const fd = new FormData(e.currentTarget as HTMLFormElement);
+               const selectedDays = Array.from(e.currentTarget.querySelectorAll('input[type="checkbox"]:checked')).map(cb => Number((cb as HTMLInputElement).value));
+               
+               onAddClass({
+                 name: fd.get('name') as string,
+                 teacher_id: fd.get('teacherId') as string,
+                 start_time: fd.get('startTime') as string + ":00",
+                 end_time: fd.get('endTime') as string + ":00",
+                 schedule_days: selectedDays.length > 0 ? selectedDays : [1, 3, 5],
+                 description: 'Turma criada pela administração'
+               });
+               e.currentTarget.reset();
+             }} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  <input name="name" required placeholder="Nome da Turma" className="p-4 bg-slate-50 rounded-2xl text-slate-900 font-bold outline-none border border-slate-100" />
+                  <select name="teacherId" required className="p-4 bg-slate-50 rounded-2xl text-slate-900 font-bold outline-none border border-slate-100">
+                    <option value="">Professor</option>
+                    {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                  <div className="flex gap-2">
+                    <input name="startTime" type="time" required className="p-4 bg-slate-50 rounded-2xl text-slate-900 font-bold outline-none border border-slate-100 flex-1" />
+                    <input name="endTime" type="time" required className="p-4 bg-slate-50 rounded-2xl text-slate-900 font-bold outline-none border border-slate-100 flex-1" />
+                  </div>
+                  <button type="submit" className="bg-indigo-600 text-white font-black p-4 rounded-2xl hover:bg-indigo-700 transition-all">Criar Turma</button>
+                </div>
+                
+                <div className="flex flex-wrap gap-4 items-center">
+                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Dias:</span>
+                  {[1, 2, 3, 4, 5, 6, 0].map(day => (
+                    <label key={day} className="flex items-center gap-2 cursor-pointer group">
+                      <input type="checkbox" value={day} defaultChecked={[1, 3, 5].includes(day)} className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                      <span className="text-xs font-bold text-slate-600 group-hover:text-indigo-600 transition-colors">{WEEKDAY_LABELS[day]}</span>
+                    </label>
+                  ))}
+                </div>
+             </form>
           </div>
 
           <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm">

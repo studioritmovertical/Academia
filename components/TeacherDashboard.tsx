@@ -8,9 +8,10 @@ interface TeacherDashboardProps {
   teacher: Teacher;
   classes: Class[];
   onSelectClass: (id: string) => void;
+  onAddClass: (classData: any) => void;
 }
 
-const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, classes, onSelectClass }) => {
+const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, classes, onSelectClass, onAddClass }) => {
   
   const createQuickClass = async () => {
     const name = prompt("Nome da Turma (Ex: Turma 01 - Iniciantes):");
@@ -19,17 +20,14 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, classes, o
     const startTime = prompt("Horário de Início (HH:MM):", "18:00");
     const endTime = prompt("Horário de Término (HH:MM):", "19:00");
     
-    const { data, error } = await supabase.from('classes').insert([{
+    onAddClass({
       teacher_id: teacher.id,
       name,
       schedule_days: [1, 3], 
       start_time: (startTime || "18:00") + ":00",
       end_time: (endTime || "19:00") + ":00",
       description: 'Nova turma cadastrada via painel'
-    }]).select();
-
-    if (error) alert('Erro ao criar: ' + error.message);
-    else window.location.reload();
+    });
   };
 
   return (

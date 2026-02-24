@@ -186,6 +186,18 @@ const App: React.FC = () => {
     }
   };
 
+  const handleAddClass = async (classData: any) => {
+    try {
+      const { error } = await supabase.from('classes').insert([classData]);
+      if (error) throw error;
+      if (userRole === 'admin') await fetchAllData();
+      else await fetchData(currentUser!.id);
+    } catch (err: any) {
+      console.error("Erro ao criar turma:", err);
+      alert("Erro ao criar turma: " + err.message);
+    }
+  };
+
   if (loading) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-white p-6">
       <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-6"></div>
@@ -263,6 +275,7 @@ const App: React.FC = () => {
                   if (data) await supabase.from('student_classes').insert([{ student_id: data.id, class_id: cid }]);
                   fetchAllData();
                 }}
+                onAddClass={handleAddClass}
                 onRefresh={fetchAllData}
             />
           ) : (
@@ -289,7 +302,12 @@ const App: React.FC = () => {
           )
         ) : (
           !activeClassId ? (
-            <TeacherDashboard teacher={currentUser as Teacher} classes={classes} onSelectClass={setActiveClassId} />
+            <TeacherDashboard 
+              teacher={currentUser as Teacher} 
+              classes={classes} 
+              onSelectClass={setActiveClassId} 
+              onAddClass={handleAddClass}
+            />
           ) : (
             <ClassDetails
                 activeClass={classes.find(c => c.id === activeClassId)!}
